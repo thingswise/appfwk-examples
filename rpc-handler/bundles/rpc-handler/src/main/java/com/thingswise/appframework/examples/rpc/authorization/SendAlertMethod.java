@@ -1,6 +1,7 @@
 package com.thingswise.appframework.examples.rpc.authorization;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -95,11 +96,16 @@ public class SendAlertMethod implements RPCMethodHandler {
 	private URI backendUri;
 
 	@Override
-	public void configure(Map<String, ?> properties) throws Exception {
+	public ListenableFuture<Void> configure(Map<String, ?> properties) {
 		String backendUri = (String) properties.get("backend.uri");
 		if (backendUri != null) {
-			this.backendUri = new URI(backendUri);
+			try {
+				this.backendUri = new URI(backendUri);
+			} catch (URISyntaxException e) {
+				return Futures.immediateFailedFuture(new Exception("Invalid backend URI syntax", e));
+			}
 		}
+		return Futures.immediateFuture(null);
 	}
 
 }

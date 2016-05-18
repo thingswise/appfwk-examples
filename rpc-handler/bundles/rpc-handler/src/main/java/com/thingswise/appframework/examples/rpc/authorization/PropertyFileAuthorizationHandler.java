@@ -28,7 +28,7 @@ public class PropertyFileAuthorizationHandler implements AuthorizationHandler {
 	}
 
 	@Override
-	public void configure(Map<String, ?> properties) throws Exception {
+	public ListenableFuture<Void> configure(Map<String, ?> properties) {
 		Map<String, Set<String>> authorizations = new HashMap<String, Set<String>>();
 		for (String key : properties.keySet()) {
 			String line = (String) properties.get(key);
@@ -47,6 +47,7 @@ public class PropertyFileAuthorizationHandler implements AuthorizationHandler {
 			authorizations.put(key, methodSet);
 		}
 		this.authorizations = authorizations;
+		return Futures.immediateFuture(null);
 	}
 
 }
