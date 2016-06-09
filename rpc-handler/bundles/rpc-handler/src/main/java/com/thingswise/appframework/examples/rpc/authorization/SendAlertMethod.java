@@ -2,6 +2,7 @@ package com.thingswise.appframework.examples.rpc.authorization;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -12,7 +13,6 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.concurrent.FutureCallback;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
-import org.osgi.service.component.annotations.Component;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -45,52 +45,61 @@ public class SendAlertMethod implements RPCMethodHandler {
 	}
 
 	@Override
-	public ListenableFuture<List<Object>> handle(List<Object> request) {
-		if (request.size() != 1) {
-			return Futures.immediateFailedFuture(new RPCHandlerException("example:invalidSyntax", "Invalid input request"));
-		}
-		
-		URI backendUri = this.backendUri;
-		
-		if (backendUri == null) {
-			return Futures.immediateFailedFuture(new RPCHandlerException(RPCHandlerException.INTERNAL_ERROR, "Backend not configured"));
-		}
-		
-		HttpPost post = new HttpPost();
-		post.setEntity(new StringEntity(getGson().toJson(request.get(0)), "application/json"));
-		post.setURI(backendUri);
-		
-		final SettableFuture<List<Object>> result = SettableFuture.create();
-		final Future<HttpResponse> invocation = HttpAsyncClients.createDefault().execute(post, new FutureCallback<HttpResponse>() {
-			@Override
-			public void cancelled() {
+	public ListenableFuture<List<RPCMethodResponse>> handle(List<List<Object>> requests) {
+		List<ListenableFuture<RPCMethodResponse>> futures = new ArrayList<ListenableFuture<RPCMethodResponse>>(requests.size());
+		for (List<Object> request : requests) {
+			if (request.size() != 1) {
+				futures.add(
+					Futures.immediateFuture(new RPCMethodResponse(null, new RPCHandlerException("example:invalidSyntax", "Invalid input request"))));
+			} else {
+				URI backendUri = this.backendUri;
 				
-			}
-			@Override
-			public void completed(HttpResponse resp) {
-				if (resp.getStatusLine().getStatusCode() != 200) {
-					result.setException(new RPCHandlerException("example:backendError", String.format("Backend repoied with error: %s", resp.getStatusLine())));
-				} else {
-					result.set(Collections.emptyList());
+				if (backendUri == null) {
+					futures.add(Futures.immediateFuture(new RPCMethodResponse(null, new RPCHandlerException(RPCHandlerException.INTERNAL_ERROR, "Backend not configured"))));
+					continue;
 				}
+				
+				HttpPost post = new HttpPost();
+				post.setEntity(new StringEntity(getGson().toJson(request.get(0)), "application/json"));
+				post.setURI(backendUri);
+				
+				final SettableFuture<RPCMethodResponse> future = SettableFuture.create();
+				final Future<HttpResponse> invocation = HttpAsyncClients.createDefault().execute(post, new FutureCallback<HttpResponse>() {
+					@Override
+					public void cancelled() {
+						
+					}
+					@Override
+					public void completed(HttpResponse resp) {
+						if (resp.getStatusLine().getStatusCode() != 200) {
+							future.set(new RPCMethodResponse(null, new RPCHandlerException("example:backendError", String.format("Backend replied with error: %s", resp.getStatusLine()))));
+						} else {
+							future.set(new RPCMethodResponse(Collections.emptyList(), null));
+						}
+					}
+					@Override
+					public void failed(Exception err) {
+						future.set(new RPCMethodResponse(null, new RPCHandlerException("example:backendInvocationError", "Backend invocation error", err)));
+					}			
+				});
+				
+				future.addListener(new Runnable() {
+					@Override
+					public void run() {
+						if (future.isCancelled()) {
+							// if cancelled then cleanup
+							invocation.cancel(true);
+						}
+					}			
+				}, MoreExecutors.sameThreadExecutor());
+				
+				futures.add(future);				
 			}
-			@Override
-			public void failed(Exception err) {
-				result.setException(new RPCHandlerException("example:backendInvocationError", "Backend invocation error", err));
-			}			
-		});
+						
+		}
 		
-		result.addListener(new Runnable() {
-			@Override
-			public void run() {
-				if (result.isCancelled()) {
-					// if cancelled then cleanup
-					invocation.cancel(true);
-				}
-			}			
-		}, MoreExecutors.sameThreadExecutor());
+		return Futures.allAsList(futures);
 		
-		return result;
 	}
 	
 	private URI backendUri;
